@@ -152,6 +152,18 @@ async function api(sub, path) {
   }
   return null;
 }
+// roproxy's firewall blocks the lowercase batched /v1/games/votes route, so try the
+// capitalised batched route, then per-game routes, with one retry after a short pause.
+async function loadVotes() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt) await new Promise(r => setTimeout(r, 1500));
+    const batched = await api("games", `/v1/games/Votes?universeIds=${ids}`);
+    if (batched?.data?.length) return batched;
+    const each = (await Promise.all(GAMES.map(g => api("games", `/v1/games/${g.id}/votes`)))).filter(Boolean);
+    if (each.length) return { data: each };
+  }
+  return null;
+}
 const fmt = n => n == null ? "—" : n.toLocaleString("en-US");
 const short = n => {
   if (n == null) return "—";
@@ -204,8 +216,7 @@ async function loadImages() {
 async function refresh() {
   const [games, votes, group] = await Promise.all([
     api("games", `/v1/games?universeIds=${ids}`),
-    // per-game votes path: roproxy blocks the batched /v1/games/votes route
-    Promise.all(GAMES.map(g => api("games", `/v1/games/${g.id}/votes`))).then(a => ({ data: a.filter(Boolean) })),
+    loadVotes(),
     api("groups", `/v1/groups/${GROUP_ID}`)
   ]);
   if (!games) { document.getElementById("updated").textContent = "Live stats unavailable right now"; return; }
